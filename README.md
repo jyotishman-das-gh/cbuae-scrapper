@@ -116,6 +116,11 @@ Start in: D:\path\to\cbuae_scraper
 
 ---
 
+## Cautions
+
+- Maintain secure handling of AWS credentials.
+- Respect Central Bank of UAE website's terms of service
+
 ## License
 
 [Add your license information here]
