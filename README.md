@@ -32,7 +32,6 @@ cbuae_scraper/
 ├── auto_runner.py                # Scheduler script to auto-launch the scraper
 ├── cbuae_playwright_scraper.py  # Main scraping logic using Playwright
 ├── config.json                   # Removed from repo (contains secrets)
-├── organize_pdfs.py              # Optional categorization script
 ├── requirements.txt              # Python dependencies
 ```
 
