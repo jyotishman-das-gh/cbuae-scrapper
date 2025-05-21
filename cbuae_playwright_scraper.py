@@ -6,7 +6,7 @@ import time
 import json
 import boto3
 
-# Load AWS credentials from config.json
+# Load AWS credentials
 with open("config.json") as f:
     config = json.load(f)["AWS"]
 
@@ -19,32 +19,61 @@ s3_client = boto3.client(
 
 BUCKET_NAME = config["pdf_bucket_name"]
 
+# Category keywords for S3 subfolders
+CATEGORIES = {
+    "CBUAE Annual Reports": ["annual", "report"],
+    "Monthly Reports": ["monthly", "monetary", "ms-"],
+    "Quarterly Reports": ["q1", "q2", "q3", "q4", "quarterly"],
+    "Financial Stability Report": ["stability", "fsr"],
+    "UAE MSME Business Survey Report": ["msme", "survey"],
+}
 
 def sanitize_filename(name):
     return urllib.parse.unquote(name.split("/")[-1].split("?")[0])
 
+def extract_title_and_date(filename):
+    parts = filename.replace('.pdf', '').split('-')
+    for i, part in enumerate(parts):
+        if any(x in part.lower() for x in ["q1", "q2", "q3", "q4", "202", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
+            date = "-".join(parts[i:])
+            title = "-".join(parts[:i])
+            return title.strip(), date.strip()
+    return filename.replace('.pdf', ''), "undated"
+
+def categorize_s3_folder(filename):
+    name = filename.lower()
+    for folder, keywords in CATEGORIES.items():
+        if any(kw in name for kw in keywords):
+            return folder
+    return "Uncategorized"
 
 def upload_to_s3(local_path, file_name):
+    category_folder = categorize_s3_folder(file_name)
+    s3_key = f"{category_folder}/{file_name}"
+
     try:
-        s3_client.upload_file(local_path, BUCKET_NAME, file_name)
-        print(f" ↑ Uploaded to S3: {file_name}")
+        s3_client.upload_file(local_path, BUCKET_NAME, s3_key)
+        print(f" ↑ Uploaded to S3: {s3_key}")
     except Exception as e:
         print(f"  Failed to upload {file_name} to S3: {e}")
 
-
 def download_pdf(url, folder):
     file_name = sanitize_filename(url)
-    os.makedirs(folder, exist_ok=True)
-    path = os.path.join(folder, file_name)
+    title, date = extract_title_and_date(file_name)
+    unique_id = f"{title}_{date}".lower()
 
     already_downloaded = any(
-        file_name in files
-        for root, _, files in os.walk("downloads")
+        unique_id in f.lower().replace('.pdf', '')
+        for _, _, files in os.walk(folder)
+        for f in files
     )
 
     if already_downloaded:
         print(f"Skipped (already downloaded): {file_name}")
         return
+
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, file_name)
 
     try:
         r = requests.get(url)
@@ -58,10 +87,9 @@ def download_pdf(url, folder):
     except Exception as e:
         print(f"  Error downloading {file_name}: {e}")
 
-
 def scrape_all_pages():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto("https://www.centralbank.ae/en/news-and-publications/publications/")
         time.sleep(5)
@@ -70,7 +98,6 @@ def scrape_all_pages():
             print(f"\n  Processing Page {page_num}...")
 
             try:
-                # Wait for PDF links to be present in DOM (not necessarily visible)
                 page.wait_for_selector("a[href$='.pdf']", timeout=15000, state="attached")
                 pdf_links = page.query_selector_all("a[href$='.pdf']")
                 print(f"  Found {len(pdf_links)} PDFs")
@@ -90,14 +117,13 @@ def scrape_all_pages():
                     next_btn = page.locator(f"ul.pagination >> text=\"{page_num + 1}\"").first
                     next_btn.scroll_into_view_if_needed()
                     next_btn.click()
-                    print(f" ➡ Clicked Page {page_num + 1}")
-                    time.sleep(3)  # allow JS to re-render
+                    print(f"  Clicked Page {page_num + 1}")
+                    time.sleep(3)
                 except Exception as e:
-                    print(f" ⚠ Pagination click failed on page {page_num + 1}: {e}")
+                    print(f"  Pagination click failed on page {page_num + 1}: {e}")
                     break
 
         browser.close()
-
 
 if __name__ == "__main__":
     scrape_all_pages()
